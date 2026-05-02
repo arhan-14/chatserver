@@ -156,12 +156,13 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
             return -1;
         }
         int sender_len = first_bar - body;
-        if (sender_len >= (int)sizeof(msg->sender))
+        int sender_copy_len = sender_len;
+        if (sender_copy_len >= (int)sizeof(msg->sender))
         {
-            return -1;
+            sender_copy_len = sizeof(msg->sender) - 1;
         }
-        strncpy(msg->sender, body, sender_len);
-        msg->sender[sender_len] = '\0';
+        strncpy(msg->sender, body, sender_copy_len);
+        msg->sender[sender_copy_len] = '\0';
     
         char *second_bar = memchr(first_bar + 1, '|', body_len - (first_bar - body) - 1);
         if (second_bar == NULL)
@@ -172,14 +173,14 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
         int recipient_len = second_bar - first_bar - 1;
         if (recipient_len <= 0) return -1;
 
-        int copy_len = recipient_len;
-        if (copy_len >= (int)sizeof(msg->recipient))
+        int recipient_copy_len = recipient_len;
+        if (recipient_copy_len >= (int)sizeof(msg->recipient))
         {
-            copy_len = sizeof(msg->recipient) - 1;
+            recipient_copy_len = sizeof(msg->recipient) - 1;
         }
 
-        strncpy(msg->recipient, first_bar + 1, copy_len);
-        msg->recipient[copy_len] = '\0';
+        strncpy(msg->recipient, first_bar + 1, recipient_copy_len);
+        msg->recipient[recipient_copy_len] = '\0';
 
         int content_len = body_len - (second_bar - body) - 2;
         if (content_len <= 0)
@@ -189,14 +190,14 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
 
         msg->content_len = content_len;
 
-        int copy_len = content_len;
-        if (copy_len >= (int)sizeof(msg->content))
+        int content_copy_len = content_len;
+        if (content_copy_len >= (int)sizeof(msg->content))
         {
-            copy_len = sizeof(msg->content) - 1;
+            content_copy_len = sizeof(msg->content) - 1;
         }
 
-        strncpy(msg->content, second_bar + 1, copy_len);
-        msg->content[copy_len] = '\0';
+        strncpy(msg->content, second_bar + 1, content_copy_len);
+        msg->content[content_copy_len] = '\0';
     }
     else
     {
