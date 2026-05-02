@@ -493,7 +493,21 @@ int process_message(Message *msg, int client_fd, char *username, int *has_name)
 
 void cleanup_user(int client_fd)
 {
-
+    if (client_fd < 0) return;
+    pthread_mutex_lock(&users_mutex);
+    for (int i = 0; i < MAX_USERS; i++)
+    {
+        if (users[i].active && users[i].fd == client_fd)
+        {
+            users[i].active   = 0;
+            users[i].has_name = 0;
+            users[i].name[0]  = '\0';
+            users[i].status[0] = '\0';
+            users[i].fd       = -1;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&users_mutex);
 }
 
 void *handle_client(void *arg)
