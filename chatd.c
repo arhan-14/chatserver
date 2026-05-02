@@ -106,19 +106,19 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
         int field_len = body_len - 1;
         if (strcmp(msg->code, "NAM") == 0)
         {
-            if (field_len >= sizeof(msg->sender)) return -1;
+            if (field_len < 0 || field_len >= (int)sizeof(msg->sender)) return -1;
             strncpy(msg->sender, body, field_len);
             msg->sender[field_len] = '\0';
         }
         else if (strcmp(msg->code, "SET") == 0)
         {
-            if (field_len >= sizeof(msg->content)) return -1;
+            if (field_len < 0 || field_len >= (int)sizeof(msg->content)) return -1;
             strncpy(msg->content, body, field_len);
             msg->content[field_len] = '\0';
         }
         else
         {
-            if (field_len >= sizeof(msg->recipient)) return -1;
+            if (field_len < 0 || field_len >= (int)sizeof(msg->recipient)) return -1;
             strncpy(msg->recipient, body, field_len);
             msg->recipient[field_len] = '\0';
         }
@@ -132,7 +132,7 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
             return -1;
         }
         int sender_len = first_bar - body;
-        if (sender_len >= sizeof(msg->sender))
+        if (sender_len >= (int)sizeof(msg->sender))
         {
             return -1;
         }
@@ -146,7 +146,7 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
         }
 
         int recipient_len = second_bar - first_bar - 1;
-        if (recipient_len <= 0 || recipient_len >= sizeof(msg->recipient))
+        if (recipient_len <= 0 || recipient_len >= (int)sizeof(msg->recipient))
         {
             return -1;
         }
@@ -154,7 +154,7 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
         msg->recipient[recipient_len] = '\0';
 
         int content_len = body_len - (second_bar - body) - 2;
-        if (content_len <= 0 || content_len >= sizeof(msg->content))
+        if (content_len <= 0 || content_len >= (int)sizeof(msg->content))
         {
             return -1;
         }
@@ -169,7 +169,7 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
     return 0;
 }
 
-enum ValidationResult validate_message(Message *msg, int has_name)
+enum ValidationResult validate_message(Message *msg)
 {
     if (strcmp(msg->code, "NAM") == 0)
     {
@@ -181,7 +181,7 @@ enum ValidationResult validate_message(Message *msg, int has_name)
         {
             return ERR_TOO_LONG;
         }
-        for (int i = 0; i < strlen(msg->sender); i++)
+        for (size_t i = 0; i < strlen(msg->sender); i++)
         {
             char c = msg->sender[i];
             if (!isalpha((unsigned char)c) && !isdigit((unsigned char)c) && c != '-' && c != '_')
@@ -190,7 +190,7 @@ enum ValidationResult validate_message(Message *msg, int has_name)
             }
         }
         pthread_mutex_lock(&users_mutex);
-        for (int i = 0; i < MAX_USERS; i++)
+        for (size_t i = 0; i < MAX_USERS; i++)
         {
             if (users[i].active && strcmp(users[i].name, msg->sender) == 0)
             {
@@ -206,7 +206,7 @@ enum ValidationResult validate_message(Message *msg, int has_name)
         {
             return ERR_TOO_LONG;
         }
-        for (int i = 0; i < strlen(msg->content); i++)
+        for (size_t i = 0; i < strlen(msg->content); i++)
         {
             char c = msg->content[i];
             if (c < 32 || c > 126)
@@ -225,7 +225,7 @@ enum ValidationResult validate_message(Message *msg, int has_name)
         {
             return ERR_TOO_LONG;
         }
-        for (int i = 0; i < strlen(msg->content); i++)
+        for (size_t i = 0; i < strlen(msg->content); i++)
         {
             char c = msg->content[i];
             if (c < 32 || c > 126)
@@ -237,7 +237,7 @@ enum ValidationResult validate_message(Message *msg, int has_name)
         {
             pthread_mutex_lock(&users_mutex);
             int found = 0;
-            for (int i = 0; i < MAX_USERS; i++)
+            for (size_t i = 0; i < MAX_USERS; i++)
             {
                 if (users[i].active && strcmp(users[i].name, msg->recipient) == 0)
                 {
@@ -262,7 +262,7 @@ enum ValidationResult validate_message(Message *msg, int has_name)
         {
             pthread_mutex_lock(&users_mutex);
             int found = 0;
-            for (int i = 0; i < MAX_USERS; i++)
+            for (size_t i = 0; i < MAX_USERS; i++)
             {
                 if (users[i].active && strcmp(users[i].name, msg->recipient) == 0)
                 {
@@ -299,7 +299,7 @@ void send_err(int fd, int code, char *explanation)
 void broadcast(char *sender, char *recipient, char *body)
 {
     pthread_mutex_lock(&users_mutex);
-    for (int i = 0; i < MAX_USERS; i++)
+    for (size_t i = 0; i < MAX_USERS; i++)
     {
         if (users[i].active && users[i].has_name)
         {
@@ -324,7 +324,7 @@ int process_message(Message *msg, int client_fd, char *username, int *has_name)
     {
         pthread_mutex_lock(&users_mutex);
         int slot = -1;
-        for (int i = 0; i < MAX_USERS; i++)
+        for (size_t i = 0; i < MAX_USERS; i++)
         {
             if (!users[i].active)
             {
@@ -354,7 +354,7 @@ int process_message(Message *msg, int client_fd, char *username, int *has_name)
     else if (strcmp(msg->code, "SET") == 0)
     {
         pthread_mutex_lock(&users_mutex);
-        for (int i = 0; i < MAX_USERS; i++)
+        for (size_t i = 0; i < MAX_USERS; i++)
         {
             if (users[i].active && users[i].fd == client_fd)
             {
@@ -383,7 +383,7 @@ int process_message(Message *msg, int client_fd, char *username, int *has_name)
         {
             pthread_mutex_lock(&users_mutex);
             int recipient_fd = -1;
-            for (int i = 0; i < MAX_USERS; i++)
+            for (size_t i = 0; i < MAX_USERS; i++)
             {
                 if (users[i].active && strcmp(users[i].name, msg->recipient) == 0)
                 {
@@ -408,7 +408,7 @@ int process_message(Message *msg, int client_fd, char *username, int *has_name)
             int offset = 0;
 
             pthread_mutex_lock(&users_mutex);
-            for (int i = 0; i < MAX_USERS; i++)
+            for (size_t i = 0; i < MAX_USERS; i++)
             {
                 if (users[i].active && users[i].has_name)
                 {
@@ -453,7 +453,7 @@ int process_message(Message *msg, int client_fd, char *username, int *has_name)
             status_copy[0] = '\0';
 
             pthread_mutex_lock(&users_mutex);
-            for (int i = 0; i < MAX_USERS; i++)
+            for (size_t i = 0; i < MAX_USERS; i++)
             {
                 if (users[i].active && strcmp(users[i].name, msg->recipient) == 0)
                 {
@@ -489,7 +489,7 @@ void cleanup_user(int client_fd)
 {
     if (client_fd < 0) return;
     pthread_mutex_lock(&users_mutex);
-    for (int i = 0; i < MAX_USERS; i++)
+    for (size_t i = 0; i < MAX_USERS; i++)
     {
         if (users[i].active && users[i].fd == client_fd)
         {
@@ -578,7 +578,7 @@ void *handle_client(void *arg)
                 return NULL;
             }
 
-            enum ValidationResult vr = validate_message(&msg, has_name);
+            enum ValidationResult vr = validate_message(&msg);
             if (vr != VALID)
             {
                 char *explanation;
