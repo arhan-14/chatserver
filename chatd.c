@@ -83,30 +83,43 @@ enum HeaderResult check_header(char *acc, int acc_len, int *header_len, int *bod
 
 int parse_message(char *buf, int len, int header_len, int body_len, Message *msg)
 {
+    memset(msg, 0, sizeof(*msg));
     msg->version = buf[0];
     strncpy(msg->code, buf + 2, 3);
     msg->code[3] = '\0'; 
     msg->body_len = body_len;
+    char *body = buf +  header_len;
 
-    if (buf[header_len + body_len - 1] != '|')
+    if (body_len <= 0 || header_len + body_len > len)
     {
         return -1;
     }
 
-    if (strcmp(msg->code, "WHO" == 0) || strcmp(msg->code, "MSG" == 0) || strcmp(msg->code, "SET" == 0))
+    if (body[body_len - 1] != '|')
+    {
+        return -1;
+    }
+
+    if (strcmp(msg->code, "WHO") == 0 || strcmp(msg->code, "NAM") == 0 || strcmp(msg->code, "SET") == 0)
     {
         int field_len = body_len - 1;
         if (strcmp(msg->code, "NAM") == 0)
         {
+            if (field_len >= sizeof(msg->sender)) return -1;
             strncpy(msg->sender, body, field_len);
+            msg->sender[field_len] = '\0';
         }
         else if (strcmp(msg->code, "SET") == 0)
         {
+            if (field_len >= sizeof(msg->content)) return -1;
             strncpy(msg->content, body, field_len);
+            msg->content[field_len] = '\0';
         }
         else
         {
+            if (field_len >= sizeof(msg->recipient)) return -1;
             strncpy(msg->recipient, body, field_len);
+            msg->recipient[field_len] = '\0';
         }
     }
 
@@ -117,17 +130,35 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
         {
             return -1;
         }
-        strncpy(msg->sender, body, first_bar - body);
+        int sender_len = first_bar - body;
+        if (sender_len <= 0 || sender_len >= sizeof(msg->sender))
+        {
+            return -1;
+        }
+        strncpy(msg->sender, body, sender_len);
+        msg->sender[sender_len] = '\0';
     
         char *second_bar = memchr(first_bar + 1, '|', body_len - (first_bar - body) - 1);
         if (second_bar == NULL)
         {
             return -1;
         }
-        strncpy(msg->recipient, first_bar + 1, second_bar - first_bar - 1);
+
+        int recipient_len = second_bar - first_bar - 1;
+        if (recipient_len <= 0 || recipient_len >= sizeof(msg->recipient))
+        {
+            return -1;
+        }
+        strncpy(msg->recipient, first_bar + 1, recipient_len);
+        msg->recipient[recipient_len] = '\0';
 
         int content_len = body_len - (second_bar - body) - 2;
+        if (content_len <= 0 || content_len >= sizeof(msg->content))
+        {
+            return -1;
+        }
         strncpy(msg->content, second_bar + 1, content_len);
+        msg->content[content_len] = '\0';
     }
     else
     {
@@ -275,7 +306,7 @@ void broadcast(char *sender, char *recipient, char *body)
 
 int process_message(Message *msg, int client_fd, char *username, int *has_name)
 {
-
+    
 }
 
 void cleanup_user(int client_fd)
