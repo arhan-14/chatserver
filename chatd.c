@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include "chatd.h"
+#include <ctype.h>
 
 #define MAX_USERS 64
 
@@ -131,7 +132,7 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
             return -1;
         }
         int sender_len = first_bar - body;
-        if (sender_len <= 0 || sender_len >= sizeof(msg->sender))
+        if (sender_len < 0 || sender_len >= sizeof(msg->sender))
         {
             return -1;
         }
@@ -253,6 +254,10 @@ enum ValidationResult validate_message(Message *msg, int has_name)
     }
     else if (strcmp(msg->code, "WHO") == 0)
     {
+        if (strlen(msg->recipient) < 1)
+        {
+            return ERR_UNREADABLE;
+        }
         if (strcmp(msg->recipient, "#all") != 0)
         {
             pthread_mutex_lock(&users_mutex);
@@ -306,7 +311,184 @@ void broadcast(char *sender, char *recipient, char *body)
 
 int process_message(Message *msg, int client_fd, char *username, int *has_name)
 {
-    
+    if (strcmp(msg->code, "NAM") != 0 && !*has_name)
+    {
+        return -1;
+    }
+
+    if (strcmp(msg->code, "NAM") == 0 && *has_name)
+    {
+        return -1;
+    }
+    if (strcmp(msg->code, "NAM") == 0)
+    {
+        pthread_mutex_lock(&users_mutex);
+        int slot = -1;
+        for (int i = 0; i < MAX_USERS; i++)
+        {
+            if (!users[i].active)
+            {
+                slot = i;
+                break;
+            }
+        }
+        if (slot == -1)
+        {
+            pthread_mutex_unlock(&users_mutex);
+            return -1;
+        }
+        users[slot].fd = client_fd;
+        users[slot].active = 1;
+        users[slot].has_name = 1;
+        strncpy(users[slot].name, msg->sender, sizeof(users[slot].name) - 1);
+        users[slot].name[sizeof(users[slot].name) - 1] = '\0';
+        users[slot].status[0] = '\0';
+        pthread_mutex_unlock(&users_mutex);
+
+        strncpy(username, msg->sender, 32);
+        username[32] = '\0';
+        *has_name = 1;
+
+        send_msg(client_fd, "#all", username, "Welcome to the chat!");
+    }
+    else if (strcmp(msg->code, "SET") == 0)
+    {
+        pthread_mutex_lock(&users_mutex);
+        for (int i = 0; i < MAX_USERS; i++)
+        {
+            if (users[i].active && users[i].fd == client_fd)
+            {
+                strncpy(users[i].status, msg->content, sizeof(users[i].status) - 1);
+                users[i].status[sizeof(users[i].status) - 1] = '\0';
+                break;
+            }
+        }
+        pthread_mutex_unlock(&users_mutex);
+
+        if (strlen(msg->content) > 0)
+        {
+            char broadcast_body[128];
+            snprintf(broadcast_body, sizeof(broadcast_body),
+                     "%s is now \"%s\"", username, msg->content);
+            broadcast("#all", "#all", broadcast_body);
+        }
+    }
+    else if (strcmp(msg->code, "MSG") == 0)
+    {
+        if (strcmp(msg->recipient, "#all") == 0)
+        {
+            broadcast(username, "#all", msg->content);
+        }
+        else
+        {
+            pthread_mutex_lock(&users_mutex);
+            int recipient_fd = -1;
+            for (int i = 0; i < MAX_USERS; i++)
+            {
+                if (users[i].active && strcmp(users[i].name, msg->recipient) == 0)
+                {
+                    recipient_fd = users[i].fd;
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&users_mutex);
+
+            if (recipient_fd == -1)
+            {
+                return -1;
+            }
+            send_msg(recipient_fd, username, msg->recipient, msg->content);
+        }
+    }
+    else if (strcmp(msg->code, "WHO") == 0)
+    {
+        if (strcmp(msg->recipient, "#all") == 0)
+        {
+            char who_list[4096] = "";
+            int offset = 0;
+
+            pthread_mutex_lock(&users_mutex);
+            for (int i = 0; i < MAX_USERS; i++)
+            {
+                if (users[i].active && users[i].has_name)
+                {
+                    int written;
+                    if (strlen(users[i].status) > 0)
+                    {
+                        written = snprintf(who_list + offset, sizeof(who_list) - offset,
+                                           "%s: %s\n", users[i].name, users[i].status);
+                    }
+                    else
+                    {
+                        written = snprintf(who_list + offset, sizeof(who_list) - offset,
+                                           "%s\n", users[i].name);
+                    }
+                    if (written < 0)
+                    {
+                        break;
+                    }
+
+                    if (written >= (int)(sizeof(who_list) - offset))
+                    {
+                        offset = sizeof(who_list) - 1;
+                        break;
+                    }
+
+                    offset += written;
+                }
+            }
+            pthread_mutex_unlock(&users_mutex);
+
+            if (offset == 0)
+            {
+                strncpy(who_list, "No users online.", sizeof(who_list));
+            }
+            else
+            {
+                if (offset > 0 && who_list[offset - 1] == '\n')
+                {
+                    who_list[offset - 1] = '\0';
+                }
+            }
+
+            send_msg(client_fd, "#all", username, who_list);
+        }
+        else
+        {
+            char status_copy[65];
+            status_copy[0] = '\0';
+
+            pthread_mutex_lock(&users_mutex);
+            for (int i = 0; i < MAX_USERS; i++)
+            {
+                if (users[i].active && strcmp(users[i].name, msg->recipient) == 0)
+                {
+                    strncpy(status_copy, users[i].status, sizeof(status_copy) - 1);
+                    status_copy[sizeof(status_copy) - 1] = '\0';
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&users_mutex);
+
+            char body[128] = "";
+
+            if (strlen(status_copy) == 0)
+            {
+                send_msg(client_fd, "#all", username, "No status");
+            }
+            else
+            {
+                snprintf(body, sizeof(body), "%s: %s", msg->recipient, status_copy);
+                send_msg(client_fd, "#all", username, body);            
+            }
+        }
+    }
+    else
+    {
+        return -1;
+    }
+
+    return 0;
 }
 
 void cleanup_user(int client_fd)
