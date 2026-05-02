@@ -132,7 +132,7 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
             return -1;
         }
         int sender_len = first_bar - body;
-        if (sender_len < 0 || sender_len >= sizeof(msg->sender))
+        if (sender_len >= sizeof(msg->sender))
         {
             return -1;
         }
@@ -439,16 +439,10 @@ int process_message(Message *msg, int client_fd, char *username, int *has_name)
             }
             pthread_mutex_unlock(&users_mutex);
 
-            if (offset == 0)
+            
+            if (offset > 0 && who_list[offset - 1] == '\n')
             {
-                strncpy(who_list, "No users online.", sizeof(who_list));
-            }
-            else
-            {
-                if (offset > 0 && who_list[offset - 1] == '\n')
-                {
-                    who_list[offset - 1] = '\0';
-                }
+                who_list[offset - 1] = '\0';
             }
 
             send_msg(client_fd, "#all", username, who_list);
@@ -631,5 +625,86 @@ void *handle_client(void *arg)
 
 int main(int argc, char *argv[])
 {
+    if (argc != 2)
+    {
+        fprintf(stderr, "Usage: %s PORT\n", argv[0]);
+        return 1;
+    }
+
+    int port = atoi(argv[1]);
+    if (port <= 0 || port > 65535)
+    {
+        fprintf(stderr, "Usage: %s PORT\n", argv[0]);
+        return 1;
+    }
+
+    int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_fd < 0)
+    {
+        perror("socket");
+        return 1;
+    }
+
+    int opt = 1;
+    if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    {
+        perror("setsockopt");
+        close(listen_fd);
+        return 1;
+    }
     
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family      = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port        = htons(port);
+
+    if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+        perror("bind");
+        close(listen_fd);
+        return 1;
+    }
+
+    if (listen(listen_fd, SOMAXCONN) < 0)
+    {
+        perror("listen");
+        close(listen_fd);
+        return 1;
+    }
+
+    while (1)
+    {
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        int client_fd = accept(listen_fd, (struct sockaddr *)&client_addr, &client_len);
+        if (client_fd < 0)
+        {
+            perror("accept");
+            continue;
+        }
+
+        int *fd_ptr = malloc(sizeof(int));
+        if (fd_ptr == NULL)
+        {
+            fprintf(stderr, "malloc failed\n");
+            close(client_fd);
+            continue;
+        }
+        *fd_ptr = client_fd;
+
+        pthread_t thread;
+        if (pthread_create(&thread, NULL, handle_client, fd_ptr) != 0)
+        {
+            fprintf(stderr, "pthread_create failed\n");
+            close(client_fd);
+            free(fd_ptr);
+            continue;
+        }
+
+        pthread_detach(thread);
+    }
+
+    close(listen_fd);
+    return 0;
 }
