@@ -104,23 +104,47 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
     if (strcmp(msg->code, "WHO") == 0 || strcmp(msg->code, "NAM") == 0 || strcmp(msg->code, "SET") == 0)
     {
         int field_len = body_len - 1;
+        msg->field_len = field_len;
         if (strcmp(msg->code, "NAM") == 0)
         {
-            if (field_len < 0 || field_len >= (int)sizeof(msg->sender)) return -1;
-            strncpy(msg->sender, body, field_len);
-            msg->sender[field_len] = '\0';
+            if (field_len < 0) return -1;
+
+            int copy_len = field_len;
+            if (copy_len >= (int)sizeof(msg->sender))
+            {
+                copy_len = sizeof(msg->sender) - 1;
+            }
+
+            strncpy(msg->sender, body, copy_len);
+            msg->sender[copy_len] = '\0';
         }
         else if (strcmp(msg->code, "SET") == 0)
         {
-            if (field_len < 0 || field_len >= (int)sizeof(msg->content)) return -1;
-            strncpy(msg->content, body, field_len);
-            msg->content[field_len] = '\0';
+            if (field_len < 0) return -1;
+
+            msg->field_len = field_len;
+
+            int copy_len = field_len;
+            if (copy_len >= (int)sizeof(msg->content))
+            {
+                copy_len = sizeof(msg->content) - 1;
+            }
+
+            strncpy(msg->content, body, copy_len);
+            msg->content[copy_len] = '\0';
         }
         else
         {
-            if (field_len < 0 || field_len >= (int)sizeof(msg->recipient)) return -1;
-            strncpy(msg->recipient, body, field_len);
-            msg->recipient[field_len] = '\0';
+            if (field_len < 0) return -1;
+
+            int copy_len = field_len;
+            if (copy_len >= (int)sizeof(msg->recipient))
+            {
+                copy_len = sizeof(msg->recipient) - 1;
+            }
+
+            strncpy(msg->recipient, body, copy_len);
+            msg->recipient[copy_len] = '\0';
         }
     }
 
@@ -146,20 +170,33 @@ int parse_message(char *buf, int len, int header_len, int body_len, Message *msg
         }
 
         int recipient_len = second_bar - first_bar - 1;
-        if (recipient_len <= 0 || recipient_len >= (int)sizeof(msg->recipient))
+        if (recipient_len <= 0) return -1;
+
+        int copy_len = recipient_len;
+        if (copy_len >= (int)sizeof(msg->recipient))
         {
-            return -1;
+            copy_len = sizeof(msg->recipient) - 1;
         }
-        strncpy(msg->recipient, first_bar + 1, recipient_len);
-        msg->recipient[recipient_len] = '\0';
+
+        strncpy(msg->recipient, first_bar + 1, copy_len);
+        msg->recipient[copy_len] = '\0';
 
         int content_len = body_len - (second_bar - body) - 2;
-        if (content_len <= 0 || content_len >= (int)sizeof(msg->content))
+        if (content_len <= 0)
         {
             return -1;
         }
-        strncpy(msg->content, second_bar + 1, content_len);
-        msg->content[content_len] = '\0';
+
+        msg->content_len = content_len;
+
+        int copy_len = content_len;
+        if (copy_len >= (int)sizeof(msg->content))
+        {
+            copy_len = sizeof(msg->content) - 1;
+        }
+
+        strncpy(msg->content, second_bar + 1, copy_len);
+        msg->content[copy_len] = '\0';
     }
     else
     {
@@ -177,7 +214,13 @@ enum ValidationResult validate_message(Message *msg)
         {
             return ERR_UNREADABLE;
         }
-        if (strlen(msg->sender) > 32)
+        int name_len = msg->body_len - 1;
+
+        if (name_len < 1)
+        {
+            return ERR_UNREADABLE;
+        }
+        if (name_len > 32)
         {
             return ERR_TOO_LONG;
         }
@@ -202,7 +245,7 @@ enum ValidationResult validate_message(Message *msg)
     }
     else if (strcmp(msg->code, "SET") == 0)
     {
-        if (strlen(msg->content) > 64)
+        if (msg->field_len > 64)
         {
             return ERR_TOO_LONG;
         }
@@ -221,7 +264,7 @@ enum ValidationResult validate_message(Message *msg)
         {
             return ERR_UNREADABLE;
         }
-        if (strlen(msg->content) > 80)
+        if (msg->content_len > 80)
         {
             return ERR_TOO_LONG;
         }

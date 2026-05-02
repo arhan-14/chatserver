@@ -13,6 +13,8 @@ typedef struct Message {
     char version;
     char code[4];
     int body_len;
+    int field_len;
+    int content_len;
     char sender[33];
     char recipient[33]; 
     char content[81];
