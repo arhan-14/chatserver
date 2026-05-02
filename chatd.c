@@ -184,7 +184,7 @@ enum ValidationResult validate_message(Message *msg, int has_name)
         for (int i = 0; i < strlen(msg->sender); i++)
         {
             char c = msg->sender[i];
-            if (!isalpha(c) && !isdigit(c) && c != '-' && c != '_')
+            if (!isalpha((unsigned char)c) && !isdigit((unsigned char)c) && c != '-' && c != '_')
             {
                 return ERR_ILLEGAL_CHAR;
             }
@@ -512,7 +512,121 @@ void cleanup_user(int client_fd)
 
 void *handle_client(void *arg)
 {
+    int client_fd = *(int *)arg;
+    free(arg);
 
+    char acc[4096];
+    int acc_len = 0;
+    char temp[1024];
+    char username[33] = "";
+    int has_name = 0;
+
+    while (1)
+    {
+        ssize_t bytes = read(client_fd, temp, sizeof(temp));
+        if (bytes == 0)
+        {
+            cleanup_user(client_fd);
+            break;
+        }
+        if (bytes < 0)
+        {
+            cleanup_user(client_fd);
+            break;
+        }
+
+        if (acc_len + bytes > (int)sizeof(acc))
+        {
+            send_err(client_fd, ERR_UNREADABLE, "Unreadable");
+            cleanup_user(client_fd);
+            close(client_fd);
+            return NULL;
+        }
+
+        memcpy(acc + acc_len, temp, bytes);
+        acc_len += bytes;
+
+        while (1)
+        {
+            int header_len = 0;
+            int body_len = 0;
+            enum HeaderResult hr = check_header(acc, acc_len, &header_len, &body_len);
+
+            if (hr == NEED_MORE)
+            {
+                break;
+            }
+            if (hr == BAD_HEADER)
+            {
+                send_err(client_fd, ERR_UNREADABLE, "Unreadable");
+                cleanup_user(client_fd);
+                close(client_fd);
+                return NULL;
+            }
+            if (body_len < 0 || header_len + body_len > (int)sizeof(acc))
+            {
+                send_err(client_fd, ERR_UNREADABLE, "Unreadable");
+                cleanup_user(client_fd);
+                close(client_fd);
+                return NULL;
+            }
+            if (acc_len < header_len + body_len)
+            {
+                break;
+            }
+
+            Message msg;
+            if (parse_message(acc, acc_len, header_len, body_len, &msg) != 0)
+            {
+                send_err(client_fd, ERR_UNREADABLE, "Unreadable");
+                cleanup_user(client_fd);
+                close(client_fd);
+                return NULL;
+            }
+
+            enum ValidationResult vr = validate_message(&msg, has_name);
+            if (vr != VALID)
+            {
+                char *explanation;
+                switch (vr)
+                {
+                    case ERR_NAME_IN_USE:   explanation = "Name in use";         break;
+                    case ERR_UNKNOWN_USER:  explanation = "Unknown recipient";   break;
+                    case ERR_ILLEGAL_CHAR:  explanation = "Illegal character";   break;
+                    case ERR_TOO_LONG:      explanation = "Too long";            break;
+                    default:                explanation = "Unreadable";          break;
+                }
+                send_err(client_fd, vr, explanation);
+
+                if (vr == ERR_UNREADABLE)
+                {
+                    cleanup_user(client_fd);
+                    close(client_fd);
+                    return NULL;
+                }
+
+                int msg_len = header_len + body_len;
+                memmove(acc, acc + msg_len, acc_len - msg_len);
+                acc_len -= msg_len;
+                continue;
+            }
+
+            if (process_message(&msg, client_fd, username, &has_name) != 0)
+            {
+                send_err(client_fd, ERR_UNREADABLE, "Unreadable");
+                cleanup_user(client_fd);
+                close(client_fd);
+                return NULL;
+            }
+
+            int msg_len = header_len + body_len;
+            memmove(acc, acc + msg_len, acc_len - msg_len);
+            acc_len -= msg_len;
+        }
+    }
+
+    close(client_fd);
+    return NULL;
 }
 
 int main(int argc, char *argv[])
